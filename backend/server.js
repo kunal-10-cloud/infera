@@ -16,8 +16,6 @@ const TURN_CHECK_INTERVAL_MS = 200;
 const STT_FINAL_WAIT_MS = 1800;
 /** How often to check for transcript during wait (ms). */
 const STT_FINAL_POLL_MS = 50;
-/** If we have STT final but no audio for this long, end turn (VAD/heartbeat fallback). */
-const STT_FINAL_SILENCE_MS = 1200;
 
 // 1. Create HTTP Server for Admin API
 const server = http.createServer((req, res) => {
@@ -472,7 +470,6 @@ wss.on("connection", (ws) => {
       // Reset buffers for clean turn start
       session.finalTranscript = "";
       session.interimTranscript = "";
-      session.lastSttFinalTime = 0;
     }
 
     if (vadStatus === "speech_end" && session.isSpeaking) {
@@ -546,25 +543,13 @@ server.listen(PORT, () => {
 setInterval(() => {
   const now = Date.now();
   for (const session of sessionManager.getAllSessions()) {
-    const silenceMs = now - session.lastAudioTimestamp;
     if (
       session.isSpeaking &&
-      silenceMs > TURN_END_SILENCE_MS
+      now - session.lastAudioTimestamp  > TURN_END_SILENCE_MS
     ) {
       console.log(`[TURN] Heartbeat fallback end (${session.sessionId})`);
       finalizeTurn(session);
       continue;
-    }
-    // STT-driven fallback: we have final transcript but VAD/heartbeat never fired. End turn
-    // when we have transcript and it's been long enough since the last STT final (so we don't
-    // cut off while Deepgram is still sending more finals).
-    const hasTranscript = (session.finalTranscript || "").trim().length > 0;
-    const msSinceLastSttFinal = now - (session.lastSttFinalTime || 0);
-    if (hasTranscript && msSinceLastSttFinal > STT_FINAL_SILENCE_MS) {
-      console.log(`[TURN] Transcript-based end (${session.sessionId})`);
-      session.isSpeaking = false;
-      session.turnStartTime = session.turnStartTime || Date.now();
-      finalizeTurn(session);
     }
   }
 }, TURN_CHECK_INTERVAL_MS);
