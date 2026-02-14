@@ -12,6 +12,10 @@ const { formatForSpeech } = require("./utils/speechFormatter");
 const PORT = 8080;
 const TURN_END_SILENCE_MS = 800;
 const TURN_CHECK_INTERVAL_MS = 200;
+/** Max time to wait for STT final transcript after speech_end before proceeding (ms). */
+const STT_FINAL_WAIT_MS = 1800;
+/** How often to check for transcript during wait (ms). */
+const STT_FINAL_POLL_MS = 50;
 
 // 1. Create HTTP Server for Admin API
 const server = http.createServer((req, res) => {
@@ -502,8 +506,30 @@ async function finalizeTurn(session) {
       session.ws.send(JSON.stringify({ type: "state", value: "thinking" }));
     }
 
-    // Small delay to ensure Deepgram's final results are processed
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Wait for STT to produce a non-empty transcript (final or interim) so we don't
+    // commit with empty and skip the turn while Deepgram is still sending finals.
+    const deadline = Date.now() + STT_FINAL_WAIT_MS;
+    while (Date.now() < deadline) {
+      const hasFinal = (session.finalTranscript || "").trim().length > 0;
+      const hasInterim = (session.interimTranscript || "").trim().length > 0;
+      if (hasFinal) break;
+      if (hasInterim) {
+        // Give Deepgram a short window to send final; if not, we'll use interim below
+        await new Promise(resolve => setTimeout(resolve, 200));
+        if ((session.finalTranscript || "").trim().length > 0) break;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, STT_FINAL_POLL_MS));
+    }
+
+    // If we still have no final but have interim, use interim so the turn is not skipped
+    const finalTrim = (session.finalTranscript || "").trim();
+    const interimTrim = (session.interimTranscript || "").trim();
+    if (finalTrim.length === 0 && interimTrim.length > 0) {
+      session.finalTranscript = interimTrim;
+      session.interimTranscript = "";
+      console.log(`[TURN] Using interim as final (${session.sessionId}): "${interimTrim.length > 60 ? interimTrim.slice(0, 60) + "..." : interimTrim}"`);
+    }
   }
 
   await handleUserTurn(session);
