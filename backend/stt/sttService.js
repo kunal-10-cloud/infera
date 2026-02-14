@@ -40,6 +40,7 @@ function createStreamingSTT(session) {
         if (cleaned) {
           session.finalTranscript = (session.finalTranscript + " " + cleaned).trim();
           session.interimTranscript = ""; // Clear interim as it's now final
+          session.lastSttFinalTime = Date.now();
           console.log(`[STT FINAL] ${cleaned}`);
 
           // Emit final to UI

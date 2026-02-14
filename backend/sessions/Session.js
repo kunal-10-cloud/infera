@@ -15,6 +15,7 @@ class Session {
     this.messages = []; // Conversation history
     this.interimTranscript = ""; // Unstable, replace-only
     this.finalTranscript = "";   // Stable, append-only
+    this.lastSttFinalTime = 0;   // Timestamp of last STT final (for transcript-based turn end)
     this.sttSocket = null;       // Deepgram streaming socket
     this.dynamicContext = [];    // Real-time system instructions
     this.contextVersion = 0;     // Incremental version counter
